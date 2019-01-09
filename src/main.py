@@ -41,7 +41,7 @@ def to_bmp(m):
 
 class MandelbrotScene:
     def __init__(self, center=(0, 0), r=2., rez=256, depth=64):
-        self.center = center
+        self.center = np.array(center, dtype=np.float64)
         self.r = r
         self.rez = rez
         self.depth = depth
@@ -74,20 +74,16 @@ class MyBoxLayout(BoxLayout):
         return self.my_texture
 
     def on_touch_down(self, touch):
-        new_x = touch.sx - .5
-        new_y = touch.sy - .5
-
-        cx, cy = self.mandelbrot_scene.center
-        new_c = (cx + new_x * self.mandelbrot_scene.r,
-                 cy + new_y * self.mandelbrot_scene.r)
-
-        print(self.mandelbrot_scene.center, "->", new_c)
-        self.mandelbrot_scene.center = new_c
-        self.mandelbrot_scene.r /= 2
+        m = self.mandelbrot_scene
+        c = (np.array(touch.pos) - np.array(self.rect.pos)) / np.array(self.rect.size) - .5
+        msg = str(m.center) + "->"
+        m.center += c * m.r
+        print(msg, m.center)
+        m.r /= 2
         self.rect.texture = self.get_texture()
 
 
-class MyApp(App):
+class FucktrallApp(App):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -101,7 +97,7 @@ def on_resize(*args):
 
 def main():
     Window.bind(on_resize=on_resize)
-    return MyApp().run()
+    return FucktrallApp().run()
 
 
 if __name__ == '__main__':
