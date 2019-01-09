@@ -1,10 +1,18 @@
 from collections import Counter
+from itertools import chain
 
 import numpy as np
 from kivy.app import App
 from kivy.graphics.texture import Texture
 from kivy.graphics.vertex_instructions import Rectangle
 from kivy.uix.boxlayout import BoxLayout
+from kivy.graphics.transformation import Matrix
+from kivy.config import Config
+from kivy.uix.label import Label
+from kivy.uix.scatter import Scatter
+
+Config.set('graphics', 'width', '600')
+Config.set('graphics', 'height', '600')
 from kivy.core.window import Window
 
 from numba import jit
@@ -39,32 +47,45 @@ def to_bmp(m):
     return np.moveaxis(np.stack([r, r, r]), 0, -1)
 
 
+def transform_vector(m, v):
+    mat = np.array(m.get()).reshape((4, 4))
+    vec = np.array(list(chain(v, (0, 1))))
+    vec2 = mat.T @ vec
+    return vec2[:2]
+
+
 class MandelbrotScene:
-    def __init__(self, center=(0, 0), r=2., rez=256, depth=64):
-        self.center = np.array(center, dtype=np.float64)
-        self.r = r
+    def __init__(self, center=(0, 0), r=1., rez=256, depth=64):
+        self.matrix = Matrix().translate(*center, 0).scale(1 / r, 1 / r, 1)
+        # self.center = np.array(center, dtype=np.float64)
+        # self.r = r
         self.rez = rez
         self.depth = depth
 
     def get_data(self):
-        x, y = self.center
-        r = self.r
-        _, _, arr = mandelbrot_set(x - r, y - r, x + r, y + r, self.rez, self.rez, self.depth)
+        # x, y = self.center
+        # r = self.r
+        p0 = transform_vector(self.matrix, (-1, -1))
+        p1 = transform_vector(self.matrix, (1, 1))
+        print("p0, p1:", p0, p1)
+        _, _, arr = mandelbrot_set(*p0, *p1, self.rez, self.rez, self.depth)
         return arr
 
+    def apply_transform(self, transform):
+        pass
 
-class MyBoxLayout(BoxLayout):
+
+class MyScatter(Scatter):
     def __init__(self, **kwargs):
         rez = 256
         self.mandelbrot_scene = MandelbrotScene(rez=rez)
-        # self.mandelbrot_scene = MandelbrotScene((-0.5, 0.5), 0.5, rez=rez)
         self.my_texture = Texture.create(size=(rez, rez), colorfmt="rgb")
-
         super().__init__(**kwargs)
-
-        with self.canvas.after:
+        self.do_rotation = False
+        with self.canvas.before:
             s = 600
             self.rect = Rectangle(size=(s, s), pos=self.pos, texture=self.get_texture())
+        self.view_matrix = Matrix().scale(s/2, s/2, 1).translate(-1, -1, 0)  # (0, 300) on canvas is mapped to (-1, 1) on scene
 
     def get_texture(self):
         print('get_texture')
@@ -74,21 +95,40 @@ class MyBoxLayout(BoxLayout):
         return self.my_texture
 
     def on_touch_down(self, touch):
+        if touch.is_double_tap:
+            self.on_double_tap(touch)
+        else:
+            return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is not None:
+            print('up!', self.pos, self.scale,)
+        r = super().on_touch_up(touch)
+        if not self._touches:
+            m = self.mandelbrot_scene
+            V = self.view_matrix
+            T = self.transform
+            # M = V @ T @ V.inv() @ M
+            m.matrix = m.matrix.multiply(V.inverse()).multiply(T.inverse()).multiply(V)
+            self.rect.texture = self.get_texture()
+            self.transform = Matrix()  # self.transform.identity() works strangely
+        return r
+
+    def on_double_tap(self, touch):
+        pos = np.array(touch.pos)
         m = self.mandelbrot_scene
-        c = (np.array(touch.pos) - np.array(self.rect.pos)) / np.array(self.rect.size) - .5
-        msg = str(m.center) + "->"
-        m.center += c * m.r
-        print(msg, m.center)
-        m.r /= 2
+        c = (pos - np.array(self.rect.pos)) / np.array(self.rect.size) - .5
+        c *= 2
+        msg = str(m.matrix) + "->\n"
+        m.matrix.translate(*c, 0)
+        print(msg, m.matrix)
+        m.matrix = m.matrix.scale(.5, .5, 1)
         self.rect.texture = self.get_texture()
 
 
 class FucktrallApp(App):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
     def build(self):
-        return MyBoxLayout()
+        return MyScatter()
 
 
 def on_resize(*args):
@@ -98,6 +138,8 @@ def on_resize(*args):
 def main():
     Window.bind(on_resize=on_resize)
     return FucktrallApp().run()
+    # m = np.array(Matrix().get()).reshape((4, 4))
+    # print(m)
 
 
 if __name__ == '__main__':
