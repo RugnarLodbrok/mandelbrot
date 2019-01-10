@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+from time import time
 from itertools import chain
 
 import numpy as np
@@ -13,6 +15,15 @@ Config.set('graphics', 'height', '600')
 from kivy.core.window import Window
 
 from numba import jit
+
+
+@contextmanager
+def timing(comment, threshold=None):
+    time1 = time()
+    yield
+    time2 = time()
+    if not threshold or (time2 - time1) > threshold:
+        print(comment, time2 - time1)
 
 
 @jit
@@ -37,10 +48,31 @@ def mandelbrot_set(xmin, ymin, xmax, ymax, width, height, maxiter):
 
 
 def to_bmp(m):
-    a = np.min(m)
-    b = np.max(m)
-    r = ((m - a) * 255 / (b - a + 1)).astype(np.uint8)
-    return np.moveaxis(np.stack([r, r, r]), 0, -1)
+    min_ = np.min(m)
+    max_ = np.max(m)
+    l = ((m - min_) * 255 / (max_ - min_ + 1)).astype(np.uint8)
+    return np.moveaxis(np.stack([l, l, l]), 0, -1)
+
+
+def to_bmp2(m):
+    # m = np.log(m + 1)
+    with timing("calculating color"):
+        z = np.zeros((3,))
+        i = 8
+        i2 = 2 * i
+        i3 = 3 * i
+        i6 = 6 * i  # color is repeated every i6 iterations
+        b = np.maximum(np.abs(np.mod(m, i6) - i3) - i, 0) * 255 / i2
+        g = np.maximum(np.abs(np.mod(m + 2 * i, i6) - i3) - i, 0) * 255 / i2
+        r = np.maximum(np.abs(np.mod(m + 4 * i, i6) - i3) - i, 0) * 255 / i2
+    with timing("reseting zero per channel"):
+        r[m == 0] = 0
+        b[m == 0] = 0
+        g[m == 0] = 0
+    ret = np.moveaxis(np.stack([r, g, b]), 0, -1).astype(np.uint8)
+    with timing("reseting zero"):
+        ret[m == 0, :] = z
+    return ret
 
 
 def transform_vector(m, v):
@@ -51,7 +83,7 @@ def transform_vector(m, v):
 
 
 class MandelbrotScene:
-    def __init__(self, rez=256, depth=64):
+    def __init__(self, rez=256, depth=1024):
         self.matrix = Matrix().translate(-1.5, -1, 0).scale(2, 2, 1)
         self.rez = rez
         self.depth = depth
@@ -79,9 +111,10 @@ class MyScatter(Scatter):
         self.view_matrix = Matrix().scale(s, s, 1).translate(0, 0, 0)
 
     def get_texture(self):
-        arr = self.mandelbrot_scene.get_data()
+        with timing("calculating set"):
+            arr = self.mandelbrot_scene.get_data()
 
-        self.my_texture.blit_buffer(to_bmp(arr).tobytes(), bufferfmt='ubyte', colorfmt='rgb')
+        self.my_texture.blit_buffer(to_bmp2(arr).tobytes(), bufferfmt='ubyte', colorfmt='rgb')
         return self.my_texture
 
     def on_touch_down(self, touch):
